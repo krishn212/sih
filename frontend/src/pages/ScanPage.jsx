@@ -71,10 +71,51 @@ export default function ScanPage() {
   const [currentStep, setCurrentStep] = useState(0)
   const [error, setError]           = useState('')
 
-  const pickFile = f => {
+  const compressImage = async (originalFile) => {
+    return new Promise((resolve) => {
+      if (!originalFile || originalFile.size < 500 * 1024) return resolve(originalFile)
+      const img = new Image()
+      const reader = new FileReader()
+      reader.onload = (e) => {
+        img.src = e.target.result
+        img.onload = () => {
+          const maxDim = 1600
+          let w = img.width
+          let h = img.height
+          if (w > maxDim || h > maxDim) {
+            if (w > h) {
+              h = Math.round((h * maxDim) / w)
+              w = maxDim
+            } else {
+              w = Math.round((w * maxDim) / h)
+              h = maxDim
+            }
+          }
+          const canvas = document.createElement('canvas')
+          canvas.width = w
+          canvas.height = h
+          const ctx = canvas.getContext('2d')
+          ctx.drawImage(img, 0, 0, w, h)
+          canvas.toBlob((blob) => {
+            if (blob) {
+              resolve(new File([blob], originalFile.name.replace(/\.[^/.]+$/, ".jpg"), { type: 'image/jpeg' }))
+            } else {
+              resolve(originalFile)
+            }
+          }, 'image/jpeg', 0.88)
+        }
+        img.onerror = () => resolve(originalFile)
+      }
+      reader.onerror = () => resolve(originalFile)
+      reader.readAsDataURL(originalFile)
+    })
+  }
+
+  const pickFile = async f => {
     if (!f) return
-    setFile(f)
-    setPreview(URL.createObjectURL(f))
+    const optimized = await compressImage(f)
+    setFile(optimized)
+    setPreview(URL.createObjectURL(optimized))
     setError('')
     setCameraError('')
   }

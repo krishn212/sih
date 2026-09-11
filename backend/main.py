@@ -19,7 +19,10 @@ from routes import auth, scan, reports, dashboard
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup: create DB tables if they don't exist."""
-    create_tables()
+    try:
+        create_tables()
+    except Exception as e:
+        print(f"Non-blocking startup notice: {e}")
     # Ensure upload/report directories exist
     os.makedirs("uploads", exist_ok=True)
     os.makedirs("reports", exist_ok=True)
