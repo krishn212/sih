@@ -30,7 +30,7 @@ def _get_rule(rule_code: str) -> Optional[dict]:
 
 # ─── Individual Rule Functions ────────────────────────────────────────────────
 
-def check_mrp(field_data: Optional[dict]) -> dict:
+def check_mrp(field_data: Optional[dict], full_text: Optional[str] = None) -> dict:
     """R001 — MRP must be present and correctly formatted."""
     rule = _get_rule("R001")
 
@@ -64,10 +64,22 @@ def check_mrp(field_data: Optional[dict]) -> dict:
             "verified": rule["verified"],
         }
 
-    # Check: has a price value
-    has_price = bool(re.search(rule["required_pattern"], text, re.IGNORECASE))
-    # Check: mentions inclusive of all taxes
-    has_inclusive = bool(re.search(rule["inclusive_pattern"], text, re.IGNORECASE))
+    # Check: has a price value (support parentheses like (₹), colons, INR/Rs/₹, and /-)
+    has_price = bool(
+        re.search(r"(?i)(?:maximum\s+retail\s+price|max\.?\s*retail\s+price|m\.?r\.?p\.?)[^0-9\n\r]{0,35}\d+(?:\.\d{1,2})?", text)
+        or re.search(r"(?i)(?:Rs\.?|₹|INR|Rupees)\s*:?\s*\d+(?:\.\d{1,2})?", text)
+        or re.search(r"\b\d+(?:\.\d{1,2})?\s*/-", text)
+        or re.search(rule.get("required_pattern", ""), text, re.IGNORECASE)
+    )
+
+    # Check: mentions inclusive of all taxes in field text OR package context
+    combined = text
+    if full_text:
+        combined = text + " " + str(full_text)
+    has_inclusive = bool(
+        re.search(r"(?i)(?:inclusive\s+of\s+all\s+taxes|incl\.?\s+of\s+all\s+taxes|incl\b.*tax|inclusive.*tax|\btaxes\b)", combined)
+        or re.search(rule.get("inclusive_pattern", ""), text, re.IGNORECASE)
+    )
 
     if not has_price:
         return {
@@ -85,13 +97,13 @@ def check_mrp(field_data: Optional[dict]) -> dict:
     if not has_inclusive:
         return {
             "field": "mrp",
-            "status": "FAIL",
+            "status": "MANUAL_REVIEW",
             "rule_code": "R001",
             "source_clause": rule["source_clause"],
             "detected": text,
             "expected": "Must state 'inclusive of all taxes'",
             "confidence": confidence,
-            "reason": "MRP declaration does not include 'inclusive of all taxes' — this is a legal requirement",
+            "reason": "MRP price detected, but 'inclusive of all taxes' declaration was not found in visible text — verify package flap",
             "verified": rule["verified"],
         }
 
@@ -938,7 +950,8 @@ def run_all_rules(
     is_partially_exempt = (package_weight_g is not None and 10.0 < package_weight_g <= 20.0)
 
     # 2. Mandatory Declarations
-    results.append(check_mrp(fields.get("mrp")))
+    combined_ctx = " ".join(f.get("text", "") for f in fields.values() if isinstance(f, dict))
+    results.append(check_mrp(fields.get("mrp"), full_text=combined_ctx))
     results.append(check_net_quantity(fields.get("net_quantity")))
     results.append(check_prohibited_modifiers(fields.get("net_quantity")))
 
