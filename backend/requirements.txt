@@ -1,0 +1,35 @@
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+python-multipart>=0.0.12
+python-dotenv>=1.0.0
+
+# Database
+sqlalchemy>=2.0.0
+psycopg[binary]>=3.2.10
+alembic==1.14.0
+
+# Perception & Vision
+google-cloud-vision==3.8.1
+google-genai>=0.1.0
+
+# Image processing
+opencv-python-headless>=4.10.0.84
+Pillow>=10.0.0
+numpy>=1.26.0
+
+# Auth
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+
+# Reports
+reportlab==4.2.5
+python-docx==1.1.2
+
+# HTTP
+httpx==0.28.1
+requests==2.32.3
+
+# Utilities
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+email-validator>=2.0.0
