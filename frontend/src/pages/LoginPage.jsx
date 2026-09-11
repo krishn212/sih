@@ -24,7 +24,8 @@ export default function LoginPage() {
       localStorage.setItem('user_id', data.user_id)
       navigate('/scan')
     } catch (err) {
-      setError(err.response?.data?.detail || 'Something went wrong')
+      console.error('Auth error:', err)
+      setError(err.response?.data?.detail || err.message || 'Backend unreachable — check VITE_API_URL')
     } finally {
       setLoading(false)
     }
