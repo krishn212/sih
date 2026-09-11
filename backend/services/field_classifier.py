@@ -36,11 +36,10 @@ FIELD_PATTERNS = {
         r"(?i)(?:mfr?\.?|mfg\.?|manufacturer|packer|marketer)\s*:?\s*(.+)",
     ],
     "mfg_date": [
-        # Month/Year formats: MM/YYYY, MMM YYYY, Month YYYY
-        r"(?i)(?:mfg\.?|mfd\.?|manufactured|packed|best\s+before|expiry)\s*(?:date|on|:)?\s*:?\s*"
-        r"(\d{1,2}[/\-]\d{4}|\w+\s*\d{4})",
-        r"\b(0[1-9]|1[0-2])[/\-](20\d{2})\b",
-        r"(?i)(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\.?\s*(20\d{2})",
+        # Month/Year formats: MM/YYYY, MMM-YYYY, Month YYYY, MM-YY, MMM-YY
+        r"(?i)(?:mfg\.?|mfd\.?|manufactured|packed|best\s+before|use\s+by|expiry)\s*(?:date|on|:)?\s*[:\-]?\s*(\d{1,2}[/\-\.]\d{2,4}|[a-z]{3,9}\s*[\-\/\s]?\s*\d{2,4})",
+        r"\b(0[1-9]|1[0-2])[/\-\.](20\d{2}|\d{2})\b",
+        r"(?i)\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\.?\s*[\-\/\s]?\s*(20\d{2}|\d{2})\b",
     ],
     "consumer_care": [
         # Indian phone: 10 digits starting with 6-9, or with +91/0

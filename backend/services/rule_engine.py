@@ -257,11 +257,52 @@ def check_manufacturer(field_data: Optional[dict]) -> dict:
     }
 
 
-def check_mfg_date(field_data: Optional[dict]) -> dict:
+def check_mfg_date(field_data: Optional[dict], full_text: Optional[str] = None) -> dict:
     """R004 — Month and year of manufacture/packing/import must be present."""
     rule = _get_rule("R004")
 
-    if not field_data or not field_data.get("text"):
+    # Check for valid date patterns (support MM/YYYY, Mon-YYYY, Mon YYYY, MM-YY, Mon-YY)
+    date_patterns = [
+        r"\b(0[1-9]|1[0-2])[/\-\.](20\d{2}|\d{2})\b",
+        r"(?i)\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\.?\s*[\-\/\s]?\s*(20\d{2}|\d{2})\b",
+    ]
+
+    text = field_data.get("text", "") if field_data else ""
+    confidence = field_data.get("confidence", 0.0) if field_data else 0.0
+
+    # 1. First check the extracted field text
+    matched_date = None
+    if text:
+        for pattern in date_patterns:
+            m = re.search(pattern, text, re.IGNORECASE)
+            if m:
+                matched_date = m.group(0)
+                break
+
+    # 2. If not in field text, check the entire package text (e.g. if field classifier picked 'Best before' text)
+    if not matched_date and full_text:
+        for pattern in date_patterns:
+            m = re.search(pattern, full_text, re.IGNORECASE)
+            if m:
+                matched_date = m.group(0)
+                text = f"{text} [{matched_date}]" if text else matched_date
+                confidence = max(confidence, 0.85)
+                break
+
+    if matched_date:
+        return {
+            "field": "mfg_date",
+            "status": "PASS",
+            "rule_code": "R004",
+            "source_clause": rule["source_clause"],
+            "detected": text,
+            "expected": "Month and year (e.g. 03/2024, Aug 2026, or MM/YYYY)",
+            "confidence": max(confidence, 0.85),
+            "reason": f"Manufacturing/packing date verified: {matched_date}",
+            "verified": rule["verified"],
+        }
+
+    if not field_data or not text:
         return {
             "field": "mfg_date",
             "status": "FAIL",
@@ -273,9 +314,6 @@ def check_mfg_date(field_data: Optional[dict]) -> dict:
             "reason": "Manufacturing/packing date not found on label",
             "verified": rule["verified"],
         }
-
-    text = field_data["text"]
-    confidence = field_data.get("confidence", 0.0)
 
     if confidence < 0.5:
         return {
@@ -289,26 +327,6 @@ def check_mfg_date(field_data: Optional[dict]) -> dict:
             "reason": "OCR confidence too low — manual verification required",
             "verified": rule["verified"],
         }
-
-    # Check for valid date patterns
-    date_patterns = [
-        r"\b(0[1-9]|1[0-2])[/\-](20\d{2})\b",  # MM/YYYY
-        r"(?i)(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\.?\s*(20\d{2})",  # MMM YYYY
-    ]
-
-    for pattern in date_patterns:
-        if re.search(pattern, text, re.IGNORECASE):
-            return {
-                "field": "mfg_date",
-                "status": "PASS",
-                "rule_code": "R004",
-                "source_clause": rule["source_clause"],
-                "detected": text,
-                "expected": "Month and year (e.g. 03/2024 or Mar 2024)",
-                "confidence": confidence,
-                "reason": "Manufacturing/packing date present in valid format",
-                "verified": rule["verified"],
-            }
 
     return {
         "field": "mfg_date",
@@ -963,7 +981,7 @@ def run_all_rules(
     results.append(mfg_res)
 
     # Mfg Date (exempt if <= 20g under Rule 26)
-    date_res = check_mfg_date(fields.get("mfg_date"))
+    date_res = check_mfg_date(fields.get("mfg_date"), full_text=combined_ctx)
     if (is_completely_exempt or is_partially_exempt) and date_res["status"] == "FAIL":
         date_res["status"] = "PASS"
         date_res["reason"] = f"Exempted: Package net quantity ({package_weight_g:g}g/ml) <= 20g/ml under Rule 26."
