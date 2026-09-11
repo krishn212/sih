@@ -16,8 +16,13 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-DATABASE_URL = os.getenv("DATABASE_URL")
-engine = create_engine(DATABASE_URL, echo=False, pool_pre_ping=True)
+DATABASE_URL = os.getenv("DATABASE_URL", "")
+connect_args = {"connect_timeout": 8}
+if DATABASE_URL and "sslmode" not in DATABASE_URL and "supabase" in DATABASE_URL:
+    joiner = "&" if "?" in DATABASE_URL else "?"
+    DATABASE_URL = f"{DATABASE_URL}{joiner}sslmode=require"
+
+engine = create_engine(DATABASE_URL, echo=False, pool_pre_ping=True, connect_args=connect_args)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 

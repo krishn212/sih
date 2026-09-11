@@ -1,6 +1,6 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import client from '../api/client'
+import client, { API_BASE } from '../api/client'
 
 const CALIBRATION_OPTIONS = [
   { value:'ARUCO',    label:'ArUco Marker',  desc:'10cm×10cm printed marker — highest accuracy, full tilt correction', icon:'🎯' },
@@ -46,10 +46,20 @@ const STEPS = ['Blur Check', 'Calibration', 'OCR', 'Field Detection', 'Rules', '
 
 export default function ScanPage() {
   const navigate  = useNavigate()
-  const fileRef   = useRef()
+  const fileRef   = useRef(null)
+  const nativeCameraRef = useRef(null)
+  const videoRef  = useRef(null)
+  const canvasRef = useRef(null)
+  const streamRef = useRef(null)
+
   const [file, setFile]         = useState(null)
   const [preview, setPreview]   = useState(null)
   const [dragging, setDragging] = useState(false)
+  const [cameraOpen, setCameraOpen] = useState(false)
+  const [cameraFacing, setCameraFacing] = useState('environment') // 'environment' | 'user'
+  const [cameraLoading, setCameraLoading] = useState(false)
+  const [cameraError, setCameraError] = useState('')
+
   const [form, setForm]         = useState({
     calibration_type: 'ARUCO',
     surface_type: 'FLAT',
@@ -66,11 +76,86 @@ export default function ScanPage() {
     setFile(f)
     setPreview(URL.createObjectURL(f))
     setError('')
+    setCameraError('')
   }
+
+  const startCamera = async (facing = cameraFacing) => {
+    try {
+      setCameraLoading(true)
+      setCameraError('')
+      stopCamera()
+
+      const constraints = {
+        video: {
+          facingMode: facing,
+          width: { ideal: 1920 },
+          height: { ideal: 1080 }
+        },
+        audio: false
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia(constraints)
+      streamRef.current = stream
+      setCameraOpen(true)
+      setCameraFacing(facing)
+
+      setTimeout(() => {
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream
+          videoRef.current.play().catch(e => console.warn('Video play error:', e))
+        }
+      }, 100)
+    } catch (err) {
+      console.error('Camera error:', err)
+      setCameraError(err.name === 'NotAllowedError' ? 'Camera permission was denied. Please allow camera access in your browser settings.' : (err.message || 'Unable to access camera.'))
+      setCameraOpen(false)
+    } finally {
+      setCameraLoading(false)
+    }
+  }
+
+  const stopCamera = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(t => t.stop())
+      streamRef.current = null
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null
+    }
+    setCameraOpen(false)
+  }
+
+  const toggleFacing = () => {
+    const next = cameraFacing === 'environment' ? 'user' : 'environment'
+    startCamera(next)
+  }
+
+  const capturePhoto = () => {
+    if (!videoRef.current || !canvasRef.current) return
+    const video = videoRef.current
+    const canvas = canvasRef.current
+    const w = video.videoWidth || 1280
+    const h = video.videoHeight || 720
+    canvas.width = w
+    canvas.height = h
+    const ctx = canvas.getContext('2d')
+    ctx.drawImage(video, 0, 0, w, h)
+    canvas.toBlob((blob) => {
+      if (blob) {
+        const snapFile = new File([blob], `camera_snap_${Date.now()}.jpg`, { type: 'image/jpeg' })
+        pickFile(snapFile)
+        stopCamera()
+      }
+    }, 'image/jpeg', 0.95)
+  }
+
+  useEffect(() => {
+    return () => stopCamera()
+  }, [])
 
   const loadDemoSample = async (preset) => {
     try {
-      const resp = await fetch(`http://localhost:8000/demo_samples/${preset.file}`)
+      const resp = await fetch(`${API_BASE}/demo_samples/${preset.file}`)
       if (!resp.ok) throw new Error('Failed to fetch sample')
       const blob = await resp.blob()
       const f = new File([blob], preset.file, { type: 'image/jpeg' })
@@ -168,28 +253,177 @@ export default function ScanPage() {
             </div>
           </div>
 
-          {/* Drop zone */}
-          <div
-            className={`drop-zone ${dragging ? 'dragging' : ''}`}
-            onClick={() => fileRef.current.click()}
-            onDragOver={e => { e.preventDefault(); setDragging(true) }}
-            onDragLeave={() => setDragging(false)}
-            onDrop={onDrop}
-          >
-            <input ref={fileRef} type="file" accept="image/*" style={{ display:'none' }} onChange={e => pickFile(e.target.files[0])} />
-            {preview ? (
-              <div>
-                <img src={preview} alt="Preview" style={{ maxHeight:280, margin:'0 auto', borderRadius:8 }} />
-                <p style={{ color:'var(--text-muted)', marginTop:12, fontSize:13 }}>Click to change image</p>
-              </div>
-            ) : (
-              <>
-                <div className="drop-zone-icon">📷</div>
-                <h3 style={{ marginBottom:8 }}>Drop product label image here</h3>
-                <p style={{ color:'var(--text-muted)', fontSize:13 }}>or click to browse · JPG, PNG, WEBP supported</p>
-              </>
-            )}
+          {/* Hidden inputs for camera capture & file picking */}
+          <input ref={fileRef} type="file" accept="image/*" style={{ display:'none' }} onChange={e => pickFile(e.target.files[0])} />
+          <input ref={nativeCameraRef} type="file" accept="image/*" capture="environment" style={{ display:'none' }} onChange={e => pickFile(e.target.files[0])} />
+          <canvas ref={canvasRef} style={{ display:'none' }} />
+
+          {/* Capture Method Controls */}
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              onClick={() => {
+                if (cameraOpen) stopCamera()
+                else startCamera()
+              }}
+              className="btn btn-primary"
+              style={{
+                flex: 1, minWidth: 160, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                background: cameraOpen ? '#dc2626' : 'var(--accent)',
+              }}
+            >
+              {cameraLoading ? '⏳ Starting Camera...' : cameraOpen ? '✖ Close Viewfinder' : '📸 Open In-App Camera'}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => nativeCameraRef.current?.click()}
+              className="btn btn-ghost"
+              style={{
+                flex: 1, minWidth: 160, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                border: '1px solid var(--border)', background: 'var(--bg-surface)'
+              }}
+            >
+              📱 Mobile Camera Shutter
+            </button>
+
+            <button
+              type="button"
+              onClick={() => fileRef.current?.click()}
+              className="btn btn-ghost"
+              style={{
+                flex: 1, minWidth: 130, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                border: '1px solid var(--border)', background: 'var(--bg-surface)'
+              }}
+            >
+              📁 Browse Files
+            </button>
           </div>
+
+          {/* Camera Error Message */}
+          {cameraError && (
+            <div style={{
+              background: 'rgba(239, 68, 68, 0.1)', border: '1px solid var(--fail)', borderRadius: 8,
+              padding: '12px 14px', fontSize: 13, color: 'var(--fail)', display: 'flex', alignItems: 'center', justifyContent: 'space-between'
+            }}>
+              <span>⚠️ {cameraError}</span>
+              <button type="button" onClick={() => nativeCameraRef.current?.click()} style={{ background: 'none', border: 'none', color: 'var(--accent)', cursor: 'pointer', fontWeight: 600, textDecoration: 'underline' }}>
+                Use phone camera instead
+              </button>
+            </div>
+          )}
+
+          {/* Live In-App Viewfinder */}
+          {cameraOpen ? (
+            <div style={{
+              position: 'relative', borderRadius: 'var(--radius-lg)', overflow: 'hidden',
+              border: '2px solid var(--accent)', background: '#000', display: 'flex', flexDirection: 'column'
+            }}>
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted
+                style={{ width: '100%', minHeight: 320, maxHeight: 420, objectFit: 'contain', background: '#0a0a0a', display: 'block' }}
+              />
+
+              {/* Viewfinder Target Framing Overlay */}
+              <div style={{
+                position: 'absolute', top: '10%', left: '8%', right: '8%', bottom: '26%',
+                border: '2px dashed rgba(59, 130, 246, 0.8)', borderRadius: 12,
+                pointerEvents: 'none', display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
+                padding: 8, background: 'rgba(59, 130, 246, 0.04)',
+                boxShadow: '0 0 0 9999px rgba(0, 0, 0, 0.35)'
+              }}>
+                <span style={{
+                  fontSize: 11, background: 'rgba(15, 23, 42, 0.85)', color: '#38bdf8', padding: '3px 10px',
+                  borderRadius: 99, fontWeight: 700, letterSpacing: '0.04em', border: '1px solid rgba(56, 189, 248, 0.3)'
+                }}>
+                  🎯 ALIGN PACKAGING & ARUCO MARKER INSIDE
+                </span>
+              </div>
+
+              {/* Bottom In-App Camera Controls */}
+              <div style={{
+                padding: '12px 16px', background: 'rgba(15, 23, 42, 0.95)',
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, borderTop: '1px solid var(--border)'
+              }}>
+                <button
+                  type="button"
+                  onClick={toggleFacing}
+                  className="btn btn-ghost"
+                  style={{ fontSize: 13, border: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 6 }}
+                  title="Switch between front and back cameras"
+                >
+                  🔄 Flip Camera
+                </button>
+
+                <button
+                  type="button"
+                  onClick={capturePhoto}
+                  className="btn btn-primary"
+                  style={{
+                    padding: '10px 28px', fontSize: 14, fontWeight: 700,
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    background: 'linear-gradient(135deg, #10b981, #059669)', border: 'none',
+                    boxShadow: '0 0 16px rgba(16, 185, 129, 0.4)'
+                  }}
+                >
+                  📸 SNAP PHOTO
+                </button>
+
+                <button
+                  type="button"
+                  onClick={stopCamera}
+                  className="btn btn-ghost"
+                  style={{ fontSize: 13, color: 'var(--text-muted)' }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            /* Drop zone or Captured Photo Preview */
+            <div
+              className={`drop-zone ${dragging ? 'dragging' : ''}`}
+              onClick={() => !preview && fileRef.current.click()}
+              onDragOver={e => { e.preventDefault(); setDragging(true) }}
+              onDragLeave={() => setDragging(false)}
+              onDrop={onDrop}
+            >
+              {preview ? (
+                <div>
+                  <img src={preview} alt="Captured Preview" style={{ maxHeight: 280, margin: '0 auto', borderRadius: 8, border: '1px solid var(--border)' }} />
+                  <div style={{ display: 'flex', gap: 10, justifyContent: 'center', marginTop: 14 }}>
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); startCamera(); }}
+                      className="btn btn-ghost"
+                      style={{ fontSize: 12, border: '1px solid var(--border)' }}
+                    >
+                      📸 Retake with Camera
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); fileRef.current.click(); }}
+                      className="btn btn-ghost"
+                      style={{ fontSize: 12, border: '1px solid var(--border)' }}
+                    >
+                      📁 Choose Different Image
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div className="drop-zone-icon">📷</div>
+                  <h3 style={{ marginBottom: 8 }}>Snap photo with camera or drop image here</h3>
+                  <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>
+                    Live webcam viewfinder, phone camera, or JPG, PNG, WEBP files supported
+                  </p>
+                </>
+              )}
+            </div>
+          )}
 
           {/* Product info */}
           <div className="card">
